@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+      - run: dotnet test -c Release
+
+  acceptance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+      - name: Publish the API
+        run: dotnet publish src/CheckersApi -c Release -o out/api --nologo
+      - name: Start the service with the built-in engine
+        run: |
+          Engine__Type=stub ASPNETCORE_URLS=http://127.0.0.1:5088 nohup dotnet out/api/CheckersApi.dll > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5088/healthz && break; sleep 1; done
+      - name: Acceptance criteria
+        run: dotnet run --project tools/AcceptanceCheck -c Release -- http://127.0.0.1:5088
