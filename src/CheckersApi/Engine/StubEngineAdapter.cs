@@ -14,7 +14,7 @@ public sealed class StubEngineAdapter : IEngineAdapter
     public string Name => "stub-alphabeta";
 
     public Task StartAsync(CancellationToken ct) =>
-        Task.Run(() => _searcher.Search(Position.Start, 4, 50, ct), ct); // JIT warm-up
+        OnDedicatedThread(() => _searcher.Search(Position.Start, 4, 50, ct), ct); // JIT warm-up
 
     public Task SetPositionAsync(string pdn, CancellationToken ct)
     {
@@ -25,7 +25,7 @@ public sealed class StubEngineAdapter : IEngineAdapter
     public Task<EngineSearchResult> SearchAsync(EngineLimits limits, CancellationToken ct)
     {
         var pos = _position ?? throw new InvalidOperationException("No position set.");
-        return Task.Run(() =>
+        return OnDedicatedThread(() =>
         {
             ct.ThrowIfCancellationRequested();
             if (limits.UseTablebase && _tablebase.Probe(pos) is { } hit)
@@ -39,6 +39,13 @@ public sealed class StubEngineAdapter : IEngineAdapter
             return new EngineSearchResult(Pdn.FormatMove(o.Best), pv, ScoreOrWdl.FromCp(o.ScoreCp), o.Depth, o.Nodes, false);
         }, ct);
     }
+
+    /// <summary>
+    /// A search is CPU-bound for up to hundreds of milliseconds. Running it on a pool thread starves the timers
+    /// that enforce hardTimeMs and the threads that serve other requests, so it gets its own thread.
+    /// </summary>
+    private static Task<T> OnDedicatedThread<T>(Func<T> work, CancellationToken ct) =>
+        Task.Factory.StartNew(work, ct, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
